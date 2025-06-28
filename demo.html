@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Photo Collage Layout Demo</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+      background-color: #f5f5f5;
+    }
+
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      text-align: center;
+      color: #333;
+      margin-bottom: 30px;
+    }
+
+    .collage-container {
+      margin-bottom: 40px;
+      background: white;
+      padding: 20px;
+      border-radius: 10px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    }
+
+    .collage-title {
+      font-size: 18px;
+      font-weight: bold;
+      margin-bottom: 15px;
+      color: #555;
+    }
+
+    .photo-grid {
+      display: grid;
+      gap: 2px;
+      background-color: #ddd;
+      padding: 10px;
+      border-radius: 8px;
+    }
+
+    .photo-grid.grid-4x4 {
+      grid-template-columns: repeat(4, 1fr);
+      grid-template-rows: repeat(4, 60px);
+    }
+
+    .photo-grid.grid-6x6 {
+      grid-template-columns: repeat(6, 1fr);
+      grid-template-rows: repeat(6, 40px);
+    }
+
+    .photo-item {
+      background-size: cover;
+      background-position: center;
+      border-radius: 4px;
+      position: relative;
+      overflow: hidden;
+      transition: transform 0.2s ease;
+    }
+
+    .photo-item:hover {
+      transform: scale(1.02);
+      z-index: 10;
+    }
+
+    .photo-item::before {
+      content: attr(data-index);
+      position: absolute;
+      top: 4px;
+      left: 4px;
+      background: rgba(0, 0, 0, 0.7);
+      color: white;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-size: 12px;
+      font-weight: bold;
+    }
+
+    /* Placeholder gradient backgrounds for demo */
+    .photo-item:nth-child(1) {
+      background: linear-gradient(45deg, #ff6b6b, #ff8e8e);
+    }
+
+    .photo-item:nth-child(2) {
+      background: linear-gradient(45deg, #4ecdc4, #7dd3c0);
+    }
+
+    .photo-item:nth-child(3) {
+      background: linear-gradient(45deg, #45b7d1, #6fc5d8);
+    }
+
+    .photo-item:nth-child(4) {
+      background: linear-gradient(45deg, #f9ca24, #f9db5b);
+    }
+
+    .photo-item:nth-child(5) {
+      background: linear-gradient(45deg, #6c5ce7, #8b7ed8);
+    }
+
+    .photo-item:nth-child(6) {
+      background: linear-gradient(45deg, #fd79a8, #fd9ab7);
+    }
+
+    .photo-item:nth-child(7) {
+      background: linear-gradient(45deg, #00b894, #26c281);
+    }
+
+    .photo-item:nth-child(8) {
+      background: linear-gradient(45deg, #e17055, #e68a72);
+    }
+
+    .photo-item:nth-child(9) {
+      background: linear-gradient(45deg, #0984e3, #2d98da);
+    }
+
+    .photo-item:nth-child(10) {
+      background: linear-gradient(45deg, #a29bfe, #b8b1ff);
+    }
+
+    .photo-item:nth-child(11) {
+      background: linear-gradient(45deg, #fd5e53, #fd8a82);
+    }
+
+    .photo-item:nth-child(12) {
+      background: linear-gradient(45deg, #00cec9, #26ddd8);
+    }
+
+    .photo-item:nth-child(13) {
+      background: linear-gradient(45deg, #fdcb6e, #fdd085);
+    }
+
+    .photo-item:nth-child(14) {
+      background: linear-gradient(45deg, #ff7675, #ff9999);
+    }
+
+    .photo-item:nth-child(15) {
+      background: linear-gradient(45deg, #74b9ff, #81c7ff);
+    }
+
+    .photo-item:nth-child(16) {
+      background: linear-gradient(45deg, #55a3ff, #7bb8ff);
+    }
+
+    .photo-item:nth-child(17) {
+      background: linear-gradient(45deg, #ffeaa7, #fff2cc);
+    }
+
+    .photo-item:nth-child(18) {
+      background: linear-gradient(45deg, #fab1a0, #fcc2b0);
+    }
+
+    .info {
+      background: #f8f9fa;
+      padding: 15px;
+      border-radius: 6px;
+      margin-top: 15px;
+      font-size: 14px;
+      color: #666;
+    }
+
+    .download-link {
+      display: inline-block;
+      margin-top: 20px;
+      padding: 10px 20px;
+      background: #007bff;
+      color: white;
+      text-decoration: none;
+      border-radius: 5px;
+      transition: background 0.2s;
+    }
+
+    .download-link:hover {
+      background: #0056b3;
+    }
+
+    .controls {
+      text-align: center;
+      margin-bottom: 30px;
+    }
+
+    .generate-btn {
+      display: inline-block;
+      margin: 0 10px;
+      padding: 12px 24px;
+      background: #28a745;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 16px;
+      transition: background 0.2s;
+    }
+
+    .generate-btn:hover {
+      background: #218838;
+    }
+
+    .canvas-container {
+      margin: 20px 0;
+      text-align: center;
+    }
+
+    .canvas {
+      border: 2px solid #ddd;
+      border-radius: 8px;
+      background: white;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    }
+
+    .position-info {
+      margin-top: 15px;
+      font-family: monospace;
+      font-size: 12px;
+      background: #f8f9fa;
+      padding: 10px;
+      border-radius: 5px;
+      text-align: left;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <h1>Photo Collage Layout Demo</h1>
+
+    <div class="controls">
+      <button class="generate-btn" onclick="generateLayout(3, 3)">Generate 3×3 Layout</button>
+      <button class="generate-btn" onclick="generateLayout(4, 4)">Generate 4×4 Layout</button>
+      <button class="generate-btn" onclick="generateLayout(6, 6)">Generate 6×6 Layout</button>
+    </div>
+
+    <div class="collage-container">
+      <div class="collage-title" id="current-title">Click a button to generate a layout</div>
+      <div class="canvas-container">
+        <canvas id="canvas" class="canvas" width="600" height="600"></canvas>
+      </div>
+      <div class="position-info" id="position-info">
+        Position calculations will appear here...
+      </div>
+    </div>
+
+    <div class="collage-container">
+      <div class="collage-title">Static Grid Layout Examples</div>
+      <div class="photo-grid grid-4x4" id="grid-4x4"></div>
+      <div class="info">
+        Legacy static example - 4×4 grid with predefined layout blocks.
+      </div>
+    </div>
+
+    <a href="pos.js" class="download-link">View pos.js</a>
+    <a href="layout.js" class="download-link">View layout.js</a>
+  </div>
+
+  <script type="module">
+    // Import the layout and position calculation modules
+    import { generateLayout } from './layout.js';
+    import { calculatePositions, createGridConfig, formatPosition } from './pos.js';
+
+    // Color palette for visual variety
+    const colors = [
+      '#ff6b6b', '#4ecdc4', '#45b7d1', '#f9ca24', '#6c5ce7',
+      '#fd79a8', '#00b894', '#e17055', '#0984e3', '#a29bfe',
+      '#fd5e53', '#00cec9', '#fdcb6e', '#ff7675', '#74b9ff',
+      '#55a3ff', '#ffeaa7', '#fab1a0', '#81ecec', '#a29bfe'
+    ];
+
+    let currentLayout = null;
+    let currentPositions = null;
+
+    // Make generateLayout function available globally
+    window.generateLayout = function (rows, cols) {
+      console.log(`Generating ${rows}×${cols} layout...`);
+
+      // Generate layout using layout.js
+      currentLayout = generateLayout(rows, cols);
+      console.log('Generated layout blocks:', currentLayout);
+
+      // Create grid configuration for 600x600 canvas
+      const pageWidth = 600;
+      const pageHeight = 600;
+      const padding = 4;
+      const bleed = 0;
+
+      const gridConfig = createGridConfig(pageWidth, pageHeight, cols, rows, padding, bleed);
+      console.log('Grid config:', gridConfig);
+
+      // Calculate positions using pos.js
+      currentPositions = calculatePositions(currentLayout, gridConfig);
+      console.log('Calculated positions:', currentPositions);
+
+      // Update title
+      document.getElementById('current-title').textContent = `${rows}×${cols} Layout (${currentLayout.length} blocks)`;
+
+      // Render on canvas
+      renderCanvasLayout(currentPositions, gridConfig);
+
+      // Display position information
+      displayPositionInfo(currentPositions);
+    };
+
+    function renderCanvasLayout(positions, gridConfig) {
+      const canvas = document.getElementById('canvas');
+      const ctx = canvas.getContext('2d');
+
+      // Clear canvas
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Draw grid background
+      ctx.fillStyle = '#f8f9fa';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Draw grid lines
+      ctx.strokeStyle = '#dee2e6';
+      ctx.lineWidth = 1;
+
+      // Vertical lines
+      for (let i = 0; i <= gridConfig.cols; i++) {
+        const x = i * gridConfig.cellWidth;
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, canvas.height);
+        ctx.stroke();
+      }
+
+      // Horizontal lines
+      for (let i = 0; i <= gridConfig.rows; i++) {
+        const y = i * gridConfig.cellHeight;
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(canvas.width, y);
+        ctx.stroke();
+      }
+
+      // Draw each position block
+      positions.forEach((pos, index) => {
+        const color = colors[index % colors.length];
+
+        // Fill block
+        ctx.fillStyle = color + '80'; // Add transparency
+        ctx.fillRect(pos.x, pos.y, pos.renderWidth, pos.renderHeight);
+
+        // Draw border
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(pos.x, pos.y, pos.renderWidth, pos.renderHeight);
+
+        // Draw block number
+        ctx.fillStyle = '#000';
+        ctx.font = '14px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        const centerX = pos.x + pos.renderWidth / 2;
+        const centerY = pos.y + pos.renderHeight / 2;
+        ctx.fillText(pos.index.toString(), centerX, centerY);
+
+        // Draw dimensions text
+        ctx.font = '10px Arial';
+        ctx.fillStyle = '#333';
+        const dimText = `${pos.renderWidth}×${pos.renderHeight}`;
+        ctx.fillText(dimText, centerX, centerY + 15);
+      });
+    }
+
+    function displayPositionInfo(positions) {
+      const infoDiv = document.getElementById('position-info');
+      const infoText = positions.map(pos => {
+        return `Block ${pos.index}: pos(${pos.x},${pos.y}) render(${pos.renderWidth}×${pos.renderHeight}) total(${pos.width}×${pos.height})`;
+      }).join('\n');
+
+      infoDiv.textContent = infoText;
+    }
+
+    // Legacy static layout rendering (keep existing functionality)
+    const layouts = {
+      '4x4': [
+        { x: 0, y: 0, w: 3, h: 3, index: 0 },
+        { x: 3, y: 0, w: 1, h: 2, index: 1 },
+        { x: 3, y: 2, w: 1, h: 2, index: 2 },
+        { x: 0, y: 3, w: 3, h: 1, index: 3 }
+      ]
+    };
+
+    function renderGrid(gridId, layout) {
+      const container = document.getElementById(gridId);
+      if (!container) return;
+
+      layout.forEach(block => {
+        const photoItem = document.createElement('div');
+        photoItem.className = 'photo-item';
+        photoItem.setAttribute('data-index', block.index + 1);
+        photoItem.style.gridColumn = `${block.x + 1} / span ${block.w}`;
+        photoItem.style.gridRow = `${block.y + 1} / span ${block.h}`;
+
+        container.appendChild(photoItem);
+      });
+    }
+
+    // Render legacy static grid
+    renderGrid('grid-4x4', layouts['4x4']);
+
+    // Generate default 3x3 layout on page load
+    generateLayout(3, 3);
+
+    console.log('Photo collage layout demo initialized!');
+  </script>
+</body>
+
+</html>
