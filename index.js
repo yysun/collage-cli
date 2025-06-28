@@ -280,7 +280,7 @@ const selectPhoto = (photoQueue, layoutBlock) => {
 };
 
 // Render a photo into the specified layout block
-const renderPhoto = async (page, photo, layoutBlock) => {
+const renderPhoto = async (page, photo, layoutBlock, totalPhotosOnPage) => {
   const { index } = layoutBlock;
 
   // Get the pre-calculated position for this layout block
@@ -300,9 +300,14 @@ const renderPhoto = async (page, photo, layoutBlock) => {
   const photoAspectRatio = photo.w / photo.h;
   const cellAspectRatio = renderWidth / renderHeight;
 
-  // Check if aspect ratios are close (within 15% difference)
+  // Check if this is a single photo page (one photo per page)
+  const isSinglePhotoPage = totalPhotosOnPage === 1;
+
+  // Check if aspect ratios are close (within 50% difference)
   const aspectDifference = Math.abs(photoAspectRatio - cellAspectRatio) / cellAspectRatio;
-  const aspectMatch = aspectDifference <= 0.15;
+
+  // Force aspect match for single photo pages or when ratios are close
+  const aspectMatch = isSinglePhotoPage || aspectDifference <= 0.5;
 
   // Add to page files array for JSON output or Canvas rendering
   // Store buffer data for performance improvement
@@ -421,7 +426,7 @@ while (photoQueue.length > 0) {
     const selectedPhoto = photoQueue[selectedPhotoIndex];
 
     // Render photo into the layout block
-    await renderPhoto(page, selectedPhoto, layoutBlock);
+    await renderPhoto(page, selectedPhoto, layoutBlock, maxPhotosOnPage);
 
     // Remove photo from queue
     photoQueue.splice(selectedPhotoIndex, 1);

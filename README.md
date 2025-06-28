@@ -5,6 +5,8 @@ A powerful command-line tool for creating beautiful photo collages with smart la
 ## Features
 
 - **Smart Layout**: Automatic photo arrangement based on orientation and importance
+- **Aspect Ratio Optimization**: Intelligent layout generation that prevents extreme photo distortion
+- **Adaptive Photo Fitting**: Shows full photos when aspect ratios match, crops when they don't
 - **Color Harmony**: Sort photos by dominant hue for visually pleasing arrangements
 - **Date Sorting**: Sort photos by date (oldest first or newest first)
 - **Professional Print**: Add bleed and crop marks for print-ready output
@@ -156,11 +158,34 @@ out/
 
 ## Photo Scaling and Layout
 
-Photos are automatically scaled to fit their assigned grid spaces:
+### Aspect Ratio Optimization
+
+The tool automatically optimizes layouts to prevent photos from being distorted:
+
+- **Layout Generation**: Rejects layouts with extreme aspect ratios (blocks taller than 3:5 or wider than 5:2)
+- **Photo-Friendly Blocks**: Ensures most layout blocks have reasonable proportions for photos
+- **Smart Validation**: Accepts layouts only when less than 20% of blocks have extreme ratios
+
+### Adaptive Photo Fitting
+
+Photos are intelligently fitted based on aspect ratio compatibility:
+
+- **Aspect Match (≤15% difference)**: Uses `fit: contain` to show the complete photo
+  - Example: 4:3 photo in 4:3 cell shows the entire image
+  - May have small letterboxing with background color
+  - No cropping - preserves the full composition
+
+- **Aspect Mismatch (>15% difference)**: Uses `fit: cover` to fill the cell
+  - Example: Portrait photo in landscape cell crops to prevent distortion
+  - Ensures no empty space in cells
+  - Centers the crop for best composition
+
+### Layout Features
+
 - **Aspect Ratio Preservation**: Photos maintain their original proportions
-- **Full Coverage**: Photos are scaled to completely fill their assigned space
-- **Center Cropping**: Excess portions are cropped from the center when needed
-- **Smart Sizing**: Layout algorithm considers photo orientation and importance
+- **Smart Cropping**: When needed, excess portions are cropped from the center
+- **Orientation Matching**: Layout algorithm considers photo orientation and importance
+- **Quality Preservation**: High-quality scaling with Sharp image processing
 
 ## Development
 
