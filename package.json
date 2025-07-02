@@ -7,7 +7,7 @@
   },
   "type": "module",
   "scripts": {
-    "dev": "node index.js --input ./photos --output ./out --harmony -s 8x10in -g 2 --bleed 0.125in --padding 10 --border 5",
+    "dev": "node index.js --input ./photos --output ./out --harmony -s 8x10in --bleed 0.125in --padding 10 --border 5",
     "start": "node index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },

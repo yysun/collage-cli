@@ -10,7 +10,7 @@ import { PDFDocument } from 'pdf-lib';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
-import { generateLayout } from './layout.js';
+import { generateLayout, validateLayout, generateLayoutWithValidation } from './layout.js';
 import { calculatePositions, createGridConfig, formatPosition } from './pos.js';
 import { renderCollageToFile } from './render.js';
 
@@ -119,6 +119,20 @@ if (opt.harmony) photos.sort((a, b) => a.hue - b.hue);
 
 /* ---------- Core Functions ---------- */
 
+// Memory constraint detection
+const checkMemoryConstraints = () => {
+  const memUsage = process.memoryUsage();
+  const heapUsedMB = memUsage.heapUsed / 1024 / 1024;
+  const heapTotalMB = memUsage.heapTotal / 1024 / 1024;
+
+  return {
+    heapUsedMB: heapUsedMB,
+    heapTotalMB: heapTotalMB,
+    heapUtilization: heapUsedMB / heapTotalMB,
+    needsBatching: heapUsedMB > 512 || heapTotalMB > 1024 // Conservative thresholds
+  };
+};
+
 // Create a new page structure
 const createPage = () => {
   return {
@@ -128,20 +142,95 @@ const createPage = () => {
   };
 };
 
+// Edge case detection and handling
+const detectEdgeCase = (photoQueue, currentGrid) => {
+  if (photoQueue.length === 0) return 'NO_PHOTOS';
+  if (photoQueue.length === 1) return 'SINGLE_PHOTO';
+  if (photoQueue.length < (currentGrid?.layoutBlocks?.length || 9)) return 'INSUFFICIENT_PHOTOS';
 
-// Generate a layout for the page using the layout.js module
+  // Check for orientation bias
+  const landscapes = photoQueue.filter(p => (p.w / p.h) > 1.1).length;
+  const portraits = photoQueue.filter(p => (p.w / p.h) < 0.9).length;
+  const total = photoQueue.length;
+
+  if (landscapes / total > 0.8) return 'ALL_LANDSCAPE';
+  if (portraits / total > 0.8) return 'ALL_PORTRAIT';
+
+  return 'NORMAL';
+};
+
+const handleEdgeCase = (edgeCase, photoQueue, opt) => {
+  switch (edgeCase) {
+    case 'SINGLE_PHOTO':
+      return {
+        gridSize: 1,
+        specialHandling: 'single_photo',
+        message: 'Creating 1x1 layout for single photo'
+      };
+
+    case 'INSUFFICIENT_PHOTOS':
+      const optimalSize = Math.ceil(Math.sqrt(photoQueue.length));
+      return {
+        gridSize: Math.max(1, optimalSize),
+        specialHandling: 'reduced_grid',
+        message: `Reducing grid size to ${optimalSize}x${optimalSize} for ${photoQueue.length} photos`
+      };
+
+    case 'ALL_LANDSCAPE':
+      return {
+        gridSize: opt.grid,
+        specialHandling: 'landscape_bias',
+        message: 'Adjusting layout generation for landscape-heavy collection'
+      };
+
+    case 'ALL_PORTRAIT':
+      return {
+        gridSize: opt.grid,
+        specialHandling: 'portrait_bias',
+        message: 'Adjusting layout generation for portrait-heavy collection'
+      };
+
+    case 'NO_PHOTOS':
+      throw new Error('No photos available for processing');
+
+    default:
+      return {
+        gridSize: opt.grid,
+        specialHandling: 'normal',
+        message: null
+      };
+  }
+};
+
+// Calculate average hue for harmony scoring
+const calculateAverageHue = (photos) => {
+  if (!photos.length) return undefined;
+
+  const validHues = photos.filter(p => p.hue !== undefined).map(p => p.hue);
+  if (validHues.length === 0) return undefined;
+
+  return validHues.reduce((sum, hue) => sum + hue, 0) / validHues.length;
+};
+
+// Generate a layout for the page using enhanced validation
 const generateGrid = (page, photosRemaining = null) => {
-  // Use grid parameter from CLI, with sensible defaults
-  let gridSize = opt.grid || 6;
+  // Detect edge cases first
+  const edgeCase = detectEdgeCase(photoQueue, null);
+  const edgeHandling = handleEdgeCase(edgeCase, photoQueue, opt);
+
+  // if (edgeHandling.message) {
+  //   console.log(`  ℹ️  ${edgeHandling.message}`);
+  // }
+
+  // Use grid parameter from CLI, with edge case adjustments
+  let gridSize = edgeHandling.gridSize || opt.grid || 6;
   let gridCols = gridSize;
   let gridRows = gridSize;
 
   // For the last page, optimize grid size to match remaining photos
   if (photosRemaining !== null && photosRemaining > 0) {
-    // Calculate minimum grid size needed for remaining photos
     const minGridSize = Math.ceil(Math.sqrt(photosRemaining));
 
-    // Find optimal grid dimensions for remaining photos
     if (photosRemaining <= 4) {
       gridCols = gridRows = Math.max(2, minGridSize);
     } else if (photosRemaining <= 9) {
@@ -151,54 +240,31 @@ const generateGrid = (page, photosRemaining = null) => {
     } else if (photosRemaining <= 25) {
       gridCols = gridRows = Math.max(5, minGridSize);
     } else {
-      // For larger numbers, use the original grid size
       gridCols = gridRows = gridSize;
     }
   }
 
-  let layoutBlocks;
-  let attempts = 0;
-  const maxAttempts = 20;
+  // Set up validation constraints
+  const constraints = {
+    minBlockVariety: 3,
+    maxSingleCellPercent: 0.4,
+    minLargeBlocks: 1,
+    photoCount: photosRemaining,
+    specialHandling: edgeHandling.specialHandling
+  };
 
-  // Generate layout with photo-friendly aspect ratio validation
-  do {
-    attempts++;
+  // Adjust constraints for edge cases
+  if (edgeHandling.specialHandling === 'single_photo') {
+    constraints.minBlockVariety = 1;
+    constraints.maxSingleCellPercent = 1.0;
+    constraints.minLargeBlocks = 0;
+  } else if (edgeHandling.specialHandling === 'reduced_grid') {
+    constraints.minBlockVariety = Math.min(3, photosRemaining);
+    constraints.minLargeBlocks = photosRemaining > 2 ? 1 : 0;
+  }
 
-    // Generate the layout blocks using the sophisticated algorithm from layout.js
-    layoutBlocks = generateLayout(gridRows, gridCols);
-
-    // Check if layout blocks have reasonable aspect ratios for photos
-    let hasAcceptableBlocks = true;
-    let extremeBlocksCount = 0;
-
-    for (const block of layoutBlocks) {
-      const blockAspectRatio = block.w / block.h;
-
-      // Define acceptable aspect ratio range for photos (prevent extreme distortion)
-      // Tightened bounds to prevent overly tall or wide blocks that distort photos
-      const minPhotoFriendlyRatio = 0.6;  // Prevents blocks taller than 3:5 ratio
-      const maxPhotoFriendlyRatio = 2.5;  // Prevents blocks wider than 5:2 ratio
-
-      if (blockAspectRatio < minPhotoFriendlyRatio || blockAspectRatio > maxPhotoFriendlyRatio) {
-        extremeBlocksCount++;
-      }
-    }
-
-    // Accept layout if less than 20% of blocks have extreme aspect ratios
-    const extremeBlocksPercentage = extremeBlocksCount / layoutBlocks.length;
-    if (extremeBlocksPercentage < 0.2) {
-      break; // Layout is photo-friendly
-    }
-
-    // If we've tried many times, accept the current layout
-    if (attempts >= maxAttempts) {
-      if (extremeBlocksCount > 0) {
-        console.log(`  ⚠️ Layout has ${extremeBlocksCount} blocks with extreme aspect ratios after ${maxAttempts} attempts`);
-      }
-      break;
-    }
-
-  } while (attempts < maxAttempts);
+  // Generate validated layout
+  const layoutBlocks = generateLayoutWithValidation(gridRows, gridCols, constraints, 100);
 
   // Create grid configuration using pos.js
   const gridConfig = createGridConfig(
@@ -206,7 +272,7 @@ const generateGrid = (page, photosRemaining = null) => {
     PAGE_H,
     gridCols,
     gridRows,
-    Math.min(Number(opt.border) || 4, 8), // Use smaller padding, max 8px
+    Math.min(Number(opt.border) || 4, 8),
     BLEED
   );
 
@@ -215,18 +281,20 @@ const generateGrid = (page, photosRemaining = null) => {
 
   const grid = {
     ...gridConfig,
-    layoutBlocks, // Store the generated layout blocks
-    positions // Store the calculated positions
+    layoutBlocks,
+    positions,
+    validation: validateLayout(layoutBlocks, constraints),
+    edgeCase: edgeCase,
+    specialHandling: edgeHandling.specialHandling
   };
 
   page.grid = grid;
-
   return grid;
 };
 
 
-// Select the best photo for a given layout block with improved orientation matching
-const selectPhoto = (photoQueue, layoutBlock) => {
+// Enhanced photo selection with weighted scoring system
+const selectPhoto = (photoQueue, layoutBlock, pageContext = {}) => {
   const { w: spanCols, h: spanRows } = layoutBlock;
   const layoutAspect = spanCols / spanRows;
   let bestIndex = -1;
@@ -234,41 +302,7 @@ const selectPhoto = (photoQueue, layoutBlock) => {
 
   for (let i = 0; i < photoQueue.length; i++) {
     const photo = photoQueue[i];
-    const photoAspect = photo.w / photo.h;
-    let score = Math.random() * 0.3; // Reduced base randomness for better matching
-
-    // Enhanced orientation matching (highest priority)
-    const isLayoutLandscape = spanCols > spanRows;
-    const isLayoutSquare = spanCols === spanRows;
-    const isPhotoLandscape = photo.orientation === 'landscape';
-    const isPhotoSquare = Math.abs(photoAspect - 1) < 0.1; // Within 10% of square
-
-    if (isLayoutSquare && isPhotoSquare) {
-      score += 3; // Perfect match for square layouts
-    } else if (isLayoutLandscape === isPhotoLandscape) {
-      score += 2.5; // Strong bonus for orientation match
-    } else {
-      score -= 0.5; // Penalty for orientation mismatch
-    }
-
-    // Aspect ratio compatibility
-    const aspectDiff = Math.abs(layoutAspect - photoAspect);
-    score += Math.max(0, 2 - aspectDiff); // Better aspect match = higher score
-
-    // Importance vs layout size matching
-    const layoutSize = spanCols * spanRows;
-    if (photo.importance >= 3 && layoutSize >= 4) {
-      score += 1.5; // High importance photos get large layouts
-    } else if (photo.importance <= 1 && layoutSize <= 2) {
-      score += 1; // Low importance photos get small layouts
-    } else if (photo.importance >= 2 && layoutSize >= 2 && layoutSize <= 4) {
-      score += 0.5; // Medium importance gets medium layouts
-    }
-
-    // Bonus for very large layouts getting high importance photos
-    if (layoutSize >= 6 && photo.importance >= 4) {
-      score += 2;
-    }
+    const score = calculatePhotoScore(photo, layoutBlock, pageContext);
 
     if (score > bestScore) {
       bestScore = score;
@@ -276,7 +310,124 @@ const selectPhoto = (photoQueue, layoutBlock) => {
     }
   }
 
+  // Handle tie-breaking with random selection
+  if (bestScore > 0) {
+    // Find all photos with similar scores (within 5% of best)
+    const similarScoreIndices = [];
+    const threshold = bestScore * 0.95;
+
+    for (let i = 0; i < photoQueue.length; i++) {
+      const score = calculatePhotoScore(photoQueue[i], layoutBlock, pageContext);
+      if (score >= threshold) {
+        similarScoreIndices.push(i);
+      }
+    }
+
+    if (similarScoreIndices.length > 1) {
+      bestIndex = similarScoreIndices[Math.floor(Math.random() * similarScoreIndices.length)];
+    }
+  }
+
   return bestIndex;
+};
+
+// Calculate weighted photo score based on multiple criteria
+const calculatePhotoScore = (photo, layoutBlock, pageContext) => {
+  const { w: spanCols, h: spanRows } = layoutBlock;
+
+  // Calculate individual scores
+  const aspectScore = calculateAspectCompatibility(photo, layoutBlock);
+  const importanceScore = calculateImportanceMatch(photo, layoutBlock);
+  const orientationScore = calculateOrientationMatch(photo, layoutBlock);
+  const harmonyScore = calculateHarmonyScore(photo, pageContext);
+
+  // Apply weights (40%, 30%, 20%, 10%)
+  return (aspectScore * 0.4) + (importanceScore * 0.3) + (orientationScore * 0.2) + (harmonyScore * 0.1);
+};
+
+// Calculate aspect ratio compatibility score
+const calculateAspectCompatibility = (photo, layoutBlock) => {
+  const photoAspect = photo.w / photo.h;
+  const layoutAspect = layoutBlock.w / layoutBlock.h;
+  const aspectDiff = Math.abs(layoutAspect - photoAspect);
+
+  // Score decreases as aspect difference increases
+  return Math.max(0, 100 - (aspectDiff * 50));
+};
+
+// Calculate importance level matching score
+const calculateImportanceMatch = (photo, layoutBlock) => {
+  const layoutSize = layoutBlock.w * layoutBlock.h;
+  const importance = photo.importance || 0;
+
+  // High importance photos should get large layouts
+  if (importance >= 3 && layoutSize >= 4) {
+    return 100;
+  }
+  // Low importance photos fit well in small layouts
+  if (importance <= 1 && layoutSize <= 2) {
+    return 90;
+  }
+  // Medium importance photos work well in medium layouts
+  if (importance >= 2 && layoutSize >= 2 && layoutSize <= 4) {
+    return 80;
+  }
+  // Very large layouts should prioritize high importance
+  if (layoutSize >= 6) {
+    return importance >= 4 ? 100 : Math.max(0, 60 - (4 - importance) * 15);
+  }
+
+  // Default scoring based on size-importance correlation
+  const sizeImportanceMatch = Math.abs(layoutSize - importance);
+  return Math.max(30, 70 - sizeImportanceMatch * 10);
+};
+
+// Calculate orientation matching score
+const calculateOrientationMatch = (photo, layoutBlock) => {
+  const photoAspect = photo.w / photo.h;
+  const layoutAspect = layoutBlock.w / layoutBlock.h;
+
+  const isPhotoLandscape = photoAspect > 1.1;
+  const isPhotoPortrait = photoAspect < 0.9;
+  const isPhotoSquare = photoAspect >= 0.9 && photoAspect <= 1.1;
+
+  const isLayoutLandscape = layoutAspect > 1.1;
+  const isLayoutPortrait = layoutAspect < 0.9;
+  const isLayoutSquare = layoutAspect >= 0.9 && layoutAspect <= 1.1;
+
+  // Perfect orientation matches
+  if (isPhotoSquare && isLayoutSquare) return 100;
+  if (isPhotoLandscape && isLayoutLandscape) return 90;
+  if (isPhotoPortrait && isLayoutPortrait) return 90;
+
+  // Acceptable matches
+  if (isPhotoSquare && !isLayoutSquare) return 70;
+  if (!isPhotoSquare && isLayoutSquare) return 60;
+
+  // Poor matches
+  return 30;
+};
+
+// Calculate visual harmony score
+const calculateHarmonyScore = (photo, pageContext) => {
+  // Base harmony score
+  let score = 50;
+
+  // If harmony is enabled, use hue information
+  if (opt.harmony && photo.hue !== undefined) {
+    const photoHue = photo.hue;
+
+    // If we have context about other photos on the page, calculate harmony
+    if (pageContext.averageHue !== undefined) {
+      const hueDiff = Math.abs(photoHue - pageContext.averageHue);
+      const normalizedDiff = Math.min(hueDiff, 360 - hueDiff); // Handle hue wrap-around
+
+      // Closer hues get higher scores
+      score = Math.max(20, 100 - (normalizedDiff / 180) * 80);
+    }
+  }
+
+  return score;
 };
 
 // Render a photo into the specified layout block
@@ -352,112 +503,135 @@ const layoutData = []; // For JSON output
 let pageNumber = 0;
 const totalPhotos = photoQueue.length;
 
-// Repeat creating new pages until queue is clear
+// Main page-centric processing loop
 while (photoQueue.length > 0) {
   pageNumber++;
+  const startTime = Date.now();
   const totalProcessed = totalPhotos - photoQueue.length;
   const progress = Math.round((totalProcessed / totalPhotos) * 100);
 
-  // 2. Create a new page
+  // Check memory constraints
+  const memCheck = checkMemoryConstraints();
+  if (memCheck.needsBatching && photoQueue.length > 100) {
+    console.log(`  ⚠️  High memory usage detected (${memCheck.heapUsedMB.toFixed(1)}MB), consider processing in smaller batches`);
+  }
+
+  // 2. Create a new page with intelligent planning
+  // console.log(`📄 Creating page ${pageNumber} (${photoQueue.length} photos remaining)`);
   const page = createPage();
   const pageFile = path.join(outDir, `page-${pageNumber}.jpg`);
 
-  // 3. Generate grid layout for this page  
-  // Check if this is the last page and optimize grid accordingly
-  const isLastPage = photoQueue.length <= (opt.grid || 6) * (opt.grid || 6);
-  let grid = generateGrid(page, isLastPage ? photoQueue.length : null);
+  // 3. Generate smart grid layout for this page
+  let grid;
+  try {
+    grid = generateGrid(page, photoQueue.length);
 
-  // For last page, regenerate layout until we have enough blocks for remaining photos
-  if (isLastPage) {
-    let attempts = 0;
-    const maxAttempts = 50; // Increased attempts for better matching
-
-    // Keep regenerating until we have exactly the right number of blocks or at least enough
-    while (attempts < maxAttempts) {
-      const blocksNeeded = photoQueue.length;
-      const blocksAvailable = grid.layoutBlocks.length;
-
-      // Perfect match - we have exactly the number of blocks we need
-      if (blocksAvailable === blocksNeeded) {
-        break;
-      }
-
-      // Not enough blocks - need to regenerate with larger grid
-      if (blocksAvailable < blocksNeeded) {
-        attempts++;
-        const currentGridSize = Math.max(grid.cols, grid.rows);
-        const newGridSize = Math.min(currentGridSize + 1, 10); // Increased cap to 10x10
-
-        // Temporarily override the grid size for this generation
-        const originalGrid = opt.grid;
-        opt.grid = newGridSize;
-        grid = generateGrid(page, photoQueue.length);
-        opt.grid = originalGrid; // Restore original
-        continue;
-      }
-
-      // Too many blocks - try to regenerate with same size to get different layout
-      if (blocksAvailable > blocksNeeded && attempts < 20) {
-        attempts++;
-        grid = generateGrid(page, photoQueue.length);
-        continue;
-      }
-
-      // If we have more blocks than needed after many attempts, that's acceptable
-      break;
+    // Log validation results
+    if (grid.validation) {
+      const v = grid.validation;
+      // if (v.isValid) {
+      //   console.log(`  ✅ Layout validated (score: ${v.score})`);
+      // } else {
+      //   console.log(`  ⚠️  Layout validation issues: ${v.issues.join(', ')}`);
+      // }
     }
+  } catch (error) {
+    console.log(`  ❌ Grid generation failed: ${error.message}`);
+    // Create emergency fallback
+    grid = {
+      layoutBlocks: [{ x: 0, y: 0, w: 1, h: 1, index: 0 }],
+      positions: [{ x: 0, y: 0, width: PAGE_W, height: PAGE_H, renderWidth: PAGE_W, renderHeight: PAGE_H, index: 0 }]
+    };
   }
 
   let photosOnPage = 0;
-
-  // Fill the page with photos using the generated layout blocks
-  const layoutBlocks = grid.layoutBlocks;
+  const layoutBlocks = grid.layoutBlocks || [];
   const maxPhotosOnPage = Math.min(layoutBlocks.length, photoQueue.length);
+
+  // 4. Smart photo assignment using enhanced selection
+  const pageContext = {
+    pageNumber: pageNumber,
+    totalPages: Math.ceil(totalPhotos / (opt.grid * opt.grid)),
+    photosRemaining: photoQueue.length,
+    averageHue: opt.harmony ? calculateAverageHue(photoQueue.slice(0, maxPhotosOnPage)) : undefined
+  };
 
   for (let blockIndex = 0; blockIndex < maxPhotosOnPage; blockIndex++) {
     const layoutBlock = layoutBlocks[blockIndex];
 
-    // Select photo for this layout block using improved matching
-    const selectedPhotoIndex = selectPhoto(photoQueue, layoutBlock);
-    if (selectedPhotoIndex === -1) {
-      continue;
+    try {
+      // Enhanced photo selection with weighted scoring
+      const selectedPhotoIndex = selectPhoto(photoQueue, layoutBlock, pageContext);
+      if (selectedPhotoIndex === -1) {
+        console.log(`  ⚠️  No suitable photo found for block ${blockIndex}`);
+        continue;
+      }
+
+      const selectedPhoto = photoQueue[selectedPhotoIndex];
+
+      // Render photo into the layout block
+      await renderPhoto(page, selectedPhoto, layoutBlock, maxPhotosOnPage);
+
+      // Remove photo from queue
+      photoQueue.splice(selectedPhotoIndex, 1);
+      photosOnPage++;
+
+    } catch (error) {
+      console.log(`  ❌ Error processing block ${blockIndex}: ${error.message}`);
+      // Continue with next block
     }
-
-    const selectedPhoto = photoQueue[selectedPhotoIndex];
-
-    // Render photo into the layout block
-    await renderPhoto(page, selectedPhoto, layoutBlock, maxPhotosOnPage);
-
-    // Remove photo from queue
-    photoQueue.splice(selectedPhotoIndex, 1);
-    photosOnPage++;
   }
 
-  // Show page completion with files used
-  process.stdout.write(`\r✓ Page ${pageNumber}: ${photosOnPage} files, ${Math.round(((totalPhotos - photoQueue.length) / totalPhotos) * 100)}%`);
+  // 5. Page completion and validation
+  const pageTime = Date.now() - startTime;
+  const timePerPhoto = photosOnPage > 0 ? (pageTime / photosOnPage).toFixed(0) : 0;
+
+  process.stdout.write(`\r✓ Page ${pageNumber}: ${photosOnPage} photos (${timePerPhoto}ms/photo), ${Math.round(((totalPhotos - photoQueue.length) / totalPhotos) * 100)}%`);
+
+  // Performance validation
+  if (pageTime > 2000) {
+    console.log(`\n  ⚠️  Page generation took ${(pageTime / 1000).toFixed(1)}s (target: <2s)`);
+  }
 
   // Handle output based on mode
   if (opt.json) {
     // JSON output mode
     layoutData.push({
       output: pageFile,
-      files: page.files
+      files: page.files,
+      metadata: {
+        pageNumber: pageNumber,
+        photosPlaced: photosOnPage,
+        processingTime: pageTime,
+        validation: grid.validation,
+        edgeCase: grid.edgeCase
+      }
     });
   } else {
     // Canvas rendering mode
-    const renderOptions = {
-      width: page.width,
-      height: page.height,
-      background: opt.bg,
-      padding: parseInt(opt.padding || 0),
-      borderWidth: parseInt(opt.borderWidth || 0),
-      borderColor: opt.borderColor,
-      format: 'jpg',
-      quality: 92
-    };
+    try {
+      const renderOptions = {
+        width: page.width,
+        height: page.height,
+        background: opt.bg,
+        padding: parseInt(opt.padding || 0),
+        borderWidth: parseInt(opt.borderWidth || 0),
+        borderColor: opt.borderColor,
+        format: 'jpg',
+        quality: 92
+      };
 
-    await renderCollageToFile(page.files, renderOptions, pageFile);
-    pages.push(pageFile);
+      await renderCollageToFile(page.files, renderOptions, pageFile);
+      pages.push(pageFile);
+    } catch (error) {
+      console.log(`\n  ❌ Error rendering page ${pageNumber}: ${error.message}`);
+    }
+  }
+
+  // Check for termination condition
+  if (photoQueue.length === 0) {
+    console.log(`\n  ✅ All photos processed successfully`);
+    break;
   }
 }
 

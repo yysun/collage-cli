@@ -28,7 +28,7 @@ if (!fs.existsSync(opt.json)) {
 }
 
 /* ---------- Main ---------- */
-console.log(`📄 Reading layout from: ${opt.json}`);
+// console.log(`📄 Reading layout from: ${opt.json}`);
 
 const renderOptions = {
   background: opt.bg,
